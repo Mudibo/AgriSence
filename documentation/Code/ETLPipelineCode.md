@@ -19,4 +19,4 @@ sequenceDiagram (Mermaid.live code)
     end
 
     FE->>SB: Upsert forecasts table
-    SB-->>FE: Write confirmed
+    SB-->>FE: Forecasts Stored

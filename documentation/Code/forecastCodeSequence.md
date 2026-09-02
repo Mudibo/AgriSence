@@ -6,9 +6,9 @@ sequenceDiagram (Mermaid.live)
     participant SB as Supabase
 
     F->>PWA: Select crop, market, horizon
-    PWA->>API: Request forecast
+    PWA->>API: Request forecast (crop, market, horizon)
     API->>SB: Query precomputed forecast
-    SB-->>API: Forecast + SHAP values
+    SB-->>API: Forecast Record (predicted price + SHAP JSON)
 
     
 

@@ -6,9 +6,9 @@ flowchart TB
     Start((" ")) --> A["<b>View current market prices</b><br>Data-driven component"]
     A --> B["<b>View historical price trends</b><br>Cross-market comparison"]
     B --> C["<b>Pick crop, market, horizon</b><br>1-month or 2-month forecast"]
-    C --> D["<b>Generate price forecast</b><br>Reads computed forecast"]
+    C --> D["<b>Request price forecast</b><br>View forecasted price"]
     D --> E["<b>View forecast explainability</b><br>SHAP feature contribution chart"]
-    E --> Dec{"<b>Price forecast<br>favorable?</b>"}
+    E --> Dec{"<b>Proceed with<br>listing?</b>"}
     Dec -- No --> A
     Dec -- Yes --> F["<b>Determine asking price</b><br>Informed by forecast"]
     F --> G["<b>Create produce listing</b><br>Crop, quantity, price, market"]
