@@ -1,0 +1,12 @@
+pandas
+numpy
+scikit-learn
+xgboost
+shap
+statsmodels
+requests
+python-dotenv
+pytest
+matplotlib
+seaborn
+# supabase  # uncomment once Supabase project is provisioned.
