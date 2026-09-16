@@ -119,6 +119,104 @@ def forward_fill_short_gaps(df: pd.DataFrame, value_col: str = "price_per_kg", m
     return result
 
 
+def diagnose_missing_gap_lengths(df: pd.DataFrame, value_col: str = "price_per_kg", group_cols: tuple[str, ...] = ("market", "commodity")) -> pd.DataFrame:
+    """Summarize consecutive-missing-month run lengths per group.
+
+    Returns one row per missing run with its length, so short/medium/long
+    gap thresholds can be chosen from evidence rather than guessed.
+    """
+    ordered = df.copy().sort_values([*group_cols, "month"]).reset_index(drop=True)
+    runs = []
+    for group_key, index in ordered.groupby(list(group_cols), sort=False).groups.items():
+        labels = list(index)
+        position = 0
+        while position < len(labels):
+            label = labels[position]
+            if pd.notna(ordered.at[label, value_col]):
+                position += 1
+                continue
+            gap_start = position
+            while position < len(labels) and pd.isna(ordered.at[labels[position], value_col]):
+                position += 1
+            runs.append(
+                {
+                    **dict(zip(group_cols, group_key if isinstance(group_key, tuple) else (group_key,))),
+                    "gap_start_month": ordered.at[labels[gap_start], "month"],
+                    "gap_length_months": position - gap_start,
+                    "is_edge_gap": gap_start == 0 or position == len(labels),
+                }
+            )
+    return pd.DataFrame(runs)
+
+
+def seasonal_interpolate_medium_gaps(
+    df: pd.DataFrame,
+    value_col: str = "price_per_kg",
+    group_cols: tuple[str, ...] = ("market", "commodity"),
+    min_gap_months: int = 3,
+    max_gap_months: int = 6,
+) -> pd.DataFrame:
+    """Fill missing runs strictly between ``min_gap_months`` and ``max_gap_months``.
+
+    Each missing month is filled using the same calendar month's price from the
+    nearest available year (prior year preferred, then next year, then two years
+    out) as a seasonal reference. If no seasonal reference exists, the value is
+    linearly interpolated between the surrounding known observations. Gaps
+    shorter than ``min_gap_months`` or longer than ``max_gap_months`` are left
+    untouched so callers can combine this with ``forward_fill_short_gaps`` and
+    leave long gaps genuinely missing.
+    """
+    result = df.copy().sort_values([*group_cols, "month"]).reset_index(drop=True)
+    if "was_interpolated" not in result.columns:
+        result["was_interpolated"] = False
+
+    for _, index in result.groupby(list(group_cols), sort=False).groups.items():
+        labels = list(index)
+        position = 0
+        while position < len(labels):
+            label = labels[position]
+            if pd.notna(result.at[label, value_col]):
+                position += 1
+                continue
+            gap_start = position
+            while position < len(labels) and pd.isna(result.at[labels[position], value_col]):
+                position += 1
+            gap_length = position - gap_start
+            if not (min_gap_months <= gap_length <= max_gap_months):
+                continue
+
+            for gap_position in range(gap_start, position):
+                gap_label = labels[gap_position]
+                gap_month = result.at[gap_label, "month"]
+                seasonal_value = None
+                for year_offset in (-1, 1, -2, 2):
+                    candidate_month = pd.Timestamp(
+                        year=gap_month.year + year_offset, month=gap_month.month, day=1
+                    )
+                    mask = result["month"] == candidate_month
+                    for col in group_cols:
+                        mask &= result[col] == result.at[gap_label, col]
+                    match = result.loc[mask, value_col]
+                    if len(match) and pd.notna(match.iloc[0]):
+                        seasonal_value = match.iloc[0]
+                        break
+                if seasonal_value is not None:
+                    result.at[gap_label, value_col] = seasonal_value
+                    result.at[gap_label, "was_interpolated"] = True
+
+            if result.loc[labels[gap_start:position], value_col].isna().any() and gap_start > 0 and position < len(labels):
+                start_value = result.at[labels[gap_start - 1], value_col]
+                end_value = result.at[labels[position], value_col]
+                if pd.notna(start_value) and pd.notna(end_value):
+                    steps = position - gap_start + 1
+                    for step, gap_position in enumerate(range(gap_start, position), start=1):
+                        gap_label = labels[gap_position]
+                        if pd.isna(result.at[gap_label, value_col]):
+                            result.at[gap_label, value_col] = start_value + (end_value - start_value) * step / steps
+                            result.at[gap_label, "was_interpolated"] = True
+    return result
+
+
 def flag_outliers_iqr(df: pd.DataFrame, value_col: str = "price_per_kg", group_cols: tuple[str, ...] = ("market", "commodity"), multiplier: float = 1.5) -> pd.DataFrame:
     """Add ``is_outlier`` using group-wise IQR bounds without removing values."""
     result = df.copy()

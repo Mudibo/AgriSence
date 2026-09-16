@@ -5,10 +5,12 @@ import pandas as pd
 from preprocessing.aggregation import aggregate_to_monthly
 from preprocessing.cleaning import (
     build_monthly_calendar,
+    diagnose_missing_gap_lengths,
     filter_target_scope,
     flag_outliers_iqr,
     forward_fill_short_gaps,
     normalize_units,
+    seasonal_interpolate_medium_gaps,
 )
 
 
@@ -73,3 +75,46 @@ def test_outlier_flag_is_non_destructive():
     assert "is_outlier" in flagged
     assert flagged.loc[4, "is_outlier"]
     assert flagged.loc[4, "price_per_kg"] == 100
+
+
+def test_diagnose_missing_gap_lengths_reports_run_sizes():
+    panel = pd.DataFrame(
+        {
+            "market": ["Nairobi"] * 12,
+            "commodity": ["Maize"] * 12,
+            "month": pd.date_range("2020-01-01", periods=12, freq="MS"),
+            "price_per_kg": [10, None, None, 40, None, None, None, None, 90, None, None, None],
+        }
+    )
+
+    runs = diagnose_missing_gap_lengths(panel)
+
+    assert sorted(runs["gap_length_months"].tolist()) == [2, 3, 4]
+
+
+def test_seasonal_interpolate_medium_gaps_uses_prior_year_and_skips_long_gaps():
+    months = pd.date_range("2019-01-01", periods=30, freq="MS")
+    prices = (
+        [10 + i for i in range(12)]  # 2019, fully observed
+        + [None] * 4  # 2020-01..04, a 4-month medium gap
+        + [40 + i for i in range(7)]  # 2020-05..11, observed
+        + [None] * 7  # 2020-12..2021-06, a 7-month gap (too long to fill)
+    )
+    panel = pd.DataFrame(
+        {
+            "market": ["Nairobi"] * 30,
+            "commodity": ["Maize"] * 30,
+            "month": months,
+            "price_per_kg": prices,
+        }
+    )
+
+    filled = seasonal_interpolate_medium_gaps(panel, min_gap_months=3, max_gap_months=6)
+
+    # 4-month gap filled from the same calendar month one year earlier.
+    assert filled.loc[12:15, "price_per_kg"].tolist() == [10, 11, 12, 13]
+    assert filled.loc[12:15, "was_interpolated"].all()
+    # 7-month gap exceeds max_gap_months and must be left untouched.
+    assert filled.loc[23:29, "price_per_kg"].isna().all()
+    assert not filled.loc[23:29, "was_interpolated"].any()
+
