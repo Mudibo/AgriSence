@@ -149,6 +149,49 @@ def diagnose_missing_gap_lengths(df: pd.DataFrame, value_col: str = "price_per_k
     return pd.DataFrame(runs)
 
 
+def list_missing_rows(
+    df: pd.DataFrame,
+    value_col: str = "price_per_kg",
+    group_cols: tuple[str, ...] = ("market", "commodity"),
+    month_col: str = "month",
+) -> pd.DataFrame:
+    """Return every row whose ``value_col`` is missing, annotated with gap context.
+
+    Each row carries the length of the missing run it belongs to, its position
+    within that run, and whether the run is leading, trailing, or interior to
+    the series, which separates coverage gaps from genuine reporting gaps.
+    """
+    ordered = df.copy().sort_values([*group_cols, month_col]).reset_index(drop=True)
+    records = []
+    for _, index in ordered.groupby(list(group_cols), sort=False).groups.items():
+        labels = list(index)
+        position = 0
+        while position < len(labels):
+            if pd.notna(ordered.at[labels[position], value_col]):
+                position += 1
+                continue
+            gap_start = position
+            while position < len(labels) and pd.isna(ordered.at[labels[position], value_col]):
+                position += 1
+            gap_length = position - gap_start
+            if gap_start == 0 and position == len(labels):
+                gap_position = "entire_series"
+            elif gap_start == 0:
+                gap_position = "leading"
+            elif position == len(labels):
+                gap_position = "trailing"
+            else:
+                gap_position = "interior"
+            for offset, gap_index in enumerate(range(gap_start, position), start=1):
+                record = ordered.loc[labels[gap_index]].to_dict()
+                record["gap_length_months"] = gap_length
+                record["month_in_gap"] = offset
+                record["gap_position"] = gap_position
+                records.append(record)
+    columns = [*ordered.columns, "gap_length_months", "month_in_gap", "gap_position"]
+    return pd.DataFrame(records, columns=columns)
+
+
 def seasonal_interpolate_medium_gaps(
     df: pd.DataFrame,
     value_col: str = "price_per_kg",

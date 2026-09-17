@@ -9,6 +9,7 @@ from preprocessing.cleaning import (
     filter_target_scope,
     flag_outliers_iqr,
     forward_fill_short_gaps,
+    list_missing_rows,
     normalize_units,
     seasonal_interpolate_medium_gaps,
 )
@@ -90,6 +91,46 @@ def test_diagnose_missing_gap_lengths_reports_run_sizes():
     runs = diagnose_missing_gap_lengths(panel)
 
     assert sorted(runs["gap_length_months"].tolist()) == [2, 3, 4]
+
+
+def test_list_missing_rows_classifies_gap_position():
+    panel = pd.DataFrame(
+        {
+            "market": ["Nairobi"] * 8,
+            "commodity": ["Maize"] * 8,
+            "month": pd.date_range("2020-01-01", periods=8, freq="MS"),
+            "price_per_kg": [None, 20, 30, None, None, 60, None, None],
+        }
+    )
+
+    missing = list_missing_rows(panel)
+
+    assert len(missing) == 5
+    assert missing["gap_position"].tolist() == [
+        "leading",
+        "interior",
+        "interior",
+        "trailing",
+        "trailing",
+    ]
+    assert missing["gap_length_months"].tolist() == [1, 2, 2, 2, 2]
+    assert missing["month_in_gap"].tolist() == [1, 1, 2, 1, 2]
+
+
+def test_list_missing_rows_returns_empty_frame_when_complete():
+    panel = pd.DataFrame(
+        {
+            "market": ["Nairobi"] * 3,
+            "commodity": ["Maize"] * 3,
+            "month": pd.date_range("2020-01-01", periods=3, freq="MS"),
+            "price_per_kg": [10, 20, 30],
+        }
+    )
+
+    missing = list_missing_rows(panel)
+
+    assert missing.empty
+    assert "gap_position" in missing.columns
 
 
 def test_seasonal_interpolate_medium_gaps_uses_prior_year_and_skips_long_gaps():
